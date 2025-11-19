@@ -58,7 +58,7 @@ Los tres consumers (`spark-consumer-em310`, `spark-consumer-em500`, `spark-consu
 
 ```powershell
 docker exec mysql mysql -uroot -p"Os51t=Ag/3=B" -e ^
-"USE emergentETLVALENTINA;
+"USE emergentETL;
  SELECT 'em310_soterrados' AS tabla, COUNT(*) FROM em310_soterrados
  UNION ALL
  SELECT 'em500_co2', COUNT(*) FROM em500_co2
@@ -70,7 +70,7 @@ También puedes inspeccionar filas de ejemplo:
 
 ```powershell
 docker exec mysql mysql -uroot -p"Os51t=Ag/3=B" -e ^
-"USE emergentETLVALENTINA;
+"USE emergentETL;
  SELECT device_name, time, co2, temperature, humidity FROM em500_co2 LIMIT 5;
  SELECT tenant_name, time, LAeq, LAI, LAImax FROM ws302_sonido LIMIT 5;"
 ```
@@ -84,7 +84,7 @@ Los consumers escriben simultáneamente en MongoDB Atlas (colección `sensores`)
 1. **MySQL (contenedor):**
    - Usuario: `root`
    - Contraseña: `Os51t=Ag/3=B`
-   - Base de datos: `emergentETLVALENTINA`
+   - Base de datos: `emergentETL`
 
 2. **MongoDB Atlas:**
    - URI configurada directamente en los consumers (`app/etl/spark_consumer_*.py`). Si cambias las credenciales, actualiza la variable `MONGO_ATLAS_URI`.
