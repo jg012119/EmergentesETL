@@ -30,7 +30,7 @@ services:
   spark-master:
     build: .
     container_name: spark-master
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    command: [ "/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master" ]
     ports:
       - "7077:7077"
       - "18080:8080"
@@ -46,7 +46,7 @@ services:
     container_name: spark-worker
     depends_on:
       - spark-master
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    command: [ "/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077" ]
     ports:
       - "8081:8081"
     environment:
@@ -90,7 +90,7 @@ services:
       - kafka
       - mysql
       - spark-master
-    command: ["/opt/spark/bin/spark-submit", "--master", "local[2]", "/opt/spark/app/etl/spark_consumer_em310.py"]
+    command: [ "/opt/spark/bin/spark-submit", "--master", "local[2]", "/opt/spark/app/etl/spark_consumer_em310.py" ]
     volumes:
       - ./app:/opt/spark/app
       - ./data:/opt/spark/data
@@ -105,7 +105,7 @@ services:
       - kafka
       - mysql
       - spark-master
-    command: ["/opt/spark/bin/spark-submit", "--master", "local[2]", "/opt/spark/app/etl/spark_consumer_em500.py"]
+    command: [ "/opt/spark/bin/spark-submit", "--master", "local[2]", "/opt/spark/app/etl/spark_consumer_em500.py" ]
     volumes:
       - ./app:/opt/spark/app
       - ./data:/opt/spark/data
@@ -120,13 +120,43 @@ services:
       - kafka
       - mysql
       - spark-master
-    command: ["/opt/spark/bin/spark-submit", "--master", "local[2]", "/opt/spark/app/etl/spark_consumer_ws302.py"]
+    command: [ "/opt/spark/bin/spark-submit", "--master", "local[2]", "/opt/spark/app/etl/spark_consumer_ws302.py" ]
     volumes:
       - ./app:/opt/spark/app
       - ./data:/opt/spark/data
     environment:
       SPARK_HOME: /opt/spark
 
+  dashboard:
+    build: ./app/dashboard
+    container_name: dashboard
+    ports:
+      - "8501:8501"
+    depends_on:
+      - mysql
+    volumes:
+      - ./app/dashboard:/app
+    environment:
+      - DB_HOST=mysql
+
+  # Job de Machine Learning (ejecutar manualmente o con cron)
+  spark-ml-job:
+    build: .
+    container_name: spark-ml-job
+    depends_on:
+      - kafka
+      - mysql
+      - spark-master
+    volumes:
+      - ./app:/opt/spark/app
+      - ./data:/opt/spark/data
+      - ml_models:/opt/spark/models
+    environment:
+      SPARK_HOME: /opt/spark
+    # No ejecutar automáticamente - se ejecuta manualmente
+    command: "tail -f /dev/null"
+
 volumes:
   mongo_data:
   mysql_data:
+  ml_models:
