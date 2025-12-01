@@ -1,6 +1,6 @@
 ## Guía de despliegue - EmergentesETL
 
-Este proyecto ha sido adaptado para funcionar de manera similar al proyecto Pr-ctica3BigData, utilizando una arquitectura basada en Kafka, Spark, MySQL y MongoDB.
+Este proyecto ha sido adaptado para funcionar de manera similar al proyecto EMERGENTESETL, utilizando una arquitectura basada en Kafka, Spark, MySQL y MongoDB.
 
 ---
 

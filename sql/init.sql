@@ -87,6 +87,22 @@ CREATE TABLE IF NOT EXISTS `otros` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
+-- Tabla: predicciones
+-- Descripción: Almacena predicciones de ML
+-- ============================================
+CREATE TABLE IF NOT EXISTS `predicciones` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `fecha_generacion` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `fecha_prediccion` DATETIME,
+    `tipo_sensor` VARCHAR(50),
+    `valor_predicho` FLOAT,
+    `modelo_usado` VARCHAR(50),
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_fecha_prediccion` (`fecha_prediccion`),
+    INDEX `idx_tipo_sensor` (`tipo_sensor`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
 -- Verificación de tablas creadas
 -- ============================================
 SHOW TABLES;
