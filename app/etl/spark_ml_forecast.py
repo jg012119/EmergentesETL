@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 import time
 import pandas as pd
+import numpy as np
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,6 +84,62 @@ def detect_anomalies(df, column_name):
         logger.error(f"Error en detección de anomalías: {e}")
         return df
 
+def categorize_value(value, percentile_33, percentile_66):
+    """Categoriza un valor numérico en bajo/medio/alto basado en percentiles"""
+    if value < percentile_33:
+        return "bajo"
+    elif value < percentile_66:
+        return "medio"
+    else:
+        return "alto"
+
+def save_metrics(sensor_type, model_name, r2, rmse, mae, mape=None):
+    """Guarda métricas de evaluación en MySQL"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        insert_query = """
+        INSERT INTO ml_metricas (fecha_generacion, tipo_sensor, modelo, r2_score, rmse, mae, mape)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        cursor.execute(insert_query, (datetime.now(), sensor_type, model_name, r2, rmse, mae, mape))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"💾 Métricas guardadas: {sensor_type} - {model_name} (R²={r2:.4f}, RMSE={rmse:.4f}, MAE={mae:.4f})")
+    except Exception as e:
+        logger.error(f"❌ Error guardando métricas: {e}")
+
+def save_confusion_matrix(sensor_type, model_name, confusion_data):
+    """Guarda datos de matriz de confusión en MySQL"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        # Limpiar datos anteriores del mismo sensor y modelo
+        delete_query = "DELETE FROM confusion_matrix WHERE tipo_sensor = %s AND modelo = %s"
+        cursor.execute(delete_query, (sensor_type, model_name))
+        
+        insert_query = """
+        INSERT INTO confusion_matrix (fecha_generacion, tipo_sensor, modelo, true_label, predicted_label, count)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        
+        for (true_label, pred_label), count in confusion_data.items():
+            cursor.execute(insert_query, (datetime.now(), sensor_type, model_name, true_label, pred_label, count))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"💾 Matriz de confusión guardada: {sensor_type} - {model_name}")
+    except Exception as e:
+        logger.error(f"❌ Error guardando matriz de confusión: {e}")
+
+
 def train_and_predict_em310(spark):
     """Entrena y predice para sensores EM310 (distancia)"""
     logger.info("🚀 Entrenando modelo para EM310 (Distancia)...")
@@ -121,20 +178,32 @@ def train_and_predict_em310(spark):
     best_model = None
     best_r2 = -float('inf')
     best_model_name = ""
+    best_rmse = 0
+    best_mae = 0
     
-    evaluator = RegressionEvaluator(labelCol="label", metricName="r2")
+    evaluator_r2 = RegressionEvaluator(labelCol="label", metricName="r2")
+    evaluator_rmse = RegressionEvaluator(labelCol="label", metricName="rmse")
+    evaluator_mae = RegressionEvaluator(labelCol="label", metricName="mae")
     
     for model, name in [(lr, "LinearRegression"), (rf, "RandomForest"), (gbt, "GradientBoosting")]:
         try:
             pipeline = Pipeline(stages=[assembler, model])
             trained_model = pipeline.fit(train_data)
             predictions = trained_model.transform(test_data)
-            r2 = evaluator.evaluate(predictions)
             
-            logger.info(f"📊 {name} - R²: {r2:.4f}")
+            r2 = evaluator_r2.evaluate(predictions)
+            rmse = evaluator_rmse.evaluate(predictions)
+            mae = evaluator_mae.evaluate(predictions)
+            
+            logger.info(f"📊 {name} - R²: {r2:.4f}, RMSE: {rmse:.4f}, MAE: {mae:.4f}")
+            
+            # Guardar métricas
+            save_metrics("EM310", name, r2, rmse, mae)
             
             if r2 > best_r2:
                 best_r2 = r2
+                best_rmse = rmse
+                best_mae = mae
                 best_model = trained_model
                 best_model_name = name
         except Exception as e:
@@ -147,6 +216,31 @@ def train_and_predict_em310(spark):
     
     logger.info(f"✅ Mejor modelo para EM310: {best_model_name} (R²={best_r2:.4f})")
     
+    # Generar matriz de confusión
+    try:
+        predictions = best_model.transform(test_data)
+        pred_pandas = predictions.select("label", "prediction").toPandas()
+        
+        # Calcular percentiles para categorización
+        p33 = np.percentile(pred_pandas['label'], 33)
+        p66 = np.percentile(pred_pandas['label'], 66)
+        
+        # Categorizar valores
+        pred_pandas['true_category'] = pred_pandas['label'].apply(lambda x: categorize_value(x, p33, p66))
+        pred_pandas['pred_category'] = pred_pandas['prediction'].apply(lambda x: categorize_value(x, p33, p66))
+        
+        # Crear matriz de confusión
+        confusion_data = {}
+        for true_cat in ['bajo', 'medio', 'alto']:
+            for pred_cat in ['bajo', 'medio', 'alto']:
+                count = len(pred_pandas[(pred_pandas['true_category'] == true_cat) & 
+                                       (pred_pandas['pred_category'] == pred_cat)])
+                confusion_data[(true_cat, pred_cat)] = count
+        
+        save_confusion_matrix("EM310", best_model_name, confusion_data)
+    except Exception as e:
+        logger.error(f"Error generando matriz de confusión: {e}")
+    
     # Generar predicciones futuras (próximas 24 horas)
     last_timestamp = df_clean.agg({"timestamp_num": "max"}).collect()[0][0]
     
@@ -158,6 +252,7 @@ def train_and_predict_em310(spark):
     future_preds = best_model.transform(future_df)
     
     save_predictions(future_preds, "EM310", best_model_name)
+
 
 def train_and_predict_em500(spark):
     """Entrena y predice para sensores EM500 (CO2, temperatura, humedad, presión)"""
@@ -206,16 +301,24 @@ def train_and_predict_em500(spark):
             best_r2 = -float('inf')
             best_model_name = ""
             
-            evaluator = RegressionEvaluator(labelCol="label", metricName="r2")
+            evaluator_r2 = RegressionEvaluator(labelCol="label", metricName="r2")
+            evaluator_rmse = RegressionEvaluator(labelCol="label", metricName="rmse")
+            evaluator_mae = RegressionEvaluator(labelCol="label", metricName="mae")
             
             for model, name in [(lr, "LinearRegression"), (rf, "RandomForest"), (gbt, "GradientBoosting")]:
                 try:
                     pipeline = Pipeline(stages=[assembler, model])
                     trained_model = pipeline.fit(train_data)
                     predictions = trained_model.transform(test_data)
-                    r2 = evaluator.evaluate(predictions)
                     
-                    logger.info(f"  📊 {name} - R²: {r2:.4f}")
+                    r2 = evaluator_r2.evaluate(predictions)
+                    rmse = evaluator_rmse.evaluate(predictions)
+                    mae = evaluator_mae.evaluate(predictions)
+                    
+                    logger.info(f"  📊 {name} - R²: {r2:.4f}, RMSE: {rmse:.4f}, MAE: {mae:.4f}")
+                    
+                    # Guardar métricas
+                    save_metrics(sensor_type, name, r2, rmse, mae)
                     
                     if r2 > best_r2:
                         best_r2 = r2
@@ -230,6 +333,32 @@ def train_and_predict_em500(spark):
                 continue
             
             logger.info(f"✅ {metric} - Mejor: {best_model_name} (R²={best_r2:.4f})")
+            
+            # Generar matriz de confusión
+            try:
+                predictions = best_model.transform(test_data)
+                pred_pandas = predictions.select("label", "prediction").toPandas()
+                
+                # Calcular percentiles para categorización
+                p33 = np.percentile(pred_pandas['label'], 33)
+                p66 = np.percentile(pred_pandas['label'], 66)
+                
+                # Categorizar valores
+                pred_pandas['true_category'] = pred_pandas['label'].apply(lambda x: categorize_value(x, p33, p66))
+                pred_pandas['pred_category'] = pred_pandas['prediction'].apply(lambda x: categorize_value(x, p33, p66))
+                
+                # Crear matriz de confusión
+                confusion_data = {}
+                for true_cat in ['bajo', 'medio', 'alto']:
+                    for pred_cat in ['bajo', 'medio', 'alto']:
+                        count = len(pred_pandas[(pred_pandas['true_category'] == true_cat) & 
+                                               (pred_pandas['pred_category'] == pred_cat)])
+                        confusion_data[(true_cat, pred_cat)] = count
+                
+                save_confusion_matrix(sensor_type, best_model_name, confusion_data)
+            except Exception as e:
+                logger.error(f"Error generando matriz de confusión para {metric}: {e}")
+
             
             # Predicciones futuras
             last_timestamp = df_clean.agg({"timestamp_num": "max"}).collect()[0][0]
@@ -292,16 +421,24 @@ def train_and_predict_ws302(spark):
             best_r2 = -float('inf')
             best_model_name = ""
             
-            evaluator = RegressionEvaluator(labelCol="label", metricName="r2")
+            evaluator_r2 = RegressionEvaluator(labelCol="label", metricName="r2")
+            evaluator_rmse = RegressionEvaluator(labelCol="label", metricName="rmse")
+            evaluator_mae = RegressionEvaluator(labelCol="label", metricName="mae")
             
             for model, name in [(lr, "LinearRegression"), (rf, "RandomForest"), (gbt, "GradientBoosting")]:
                 try:
                     pipeline = Pipeline(stages=[assembler, model])
                     trained_model = pipeline.fit(train_data)
                     predictions = trained_model.transform(test_data)
-                    r2 = evaluator.evaluate(predictions)
                     
-                    logger.info(f"  📊 {name} - R²: {r2:.4f}")
+                    r2 = evaluator_r2.evaluate(predictions)
+                    rmse = evaluator_rmse.evaluate(predictions)
+                    mae = evaluator_mae.evaluate(predictions)
+                    
+                    logger.info(f"  📊 {name} - R²: {r2:.4f}, RMSE: {rmse:.4f}, MAE: {mae:.4f}")
+                    
+                    # Guardar métricas
+                    save_metrics(sensor_type, name, r2, rmse, mae)
                     
                     if r2 > best_r2:
                         best_r2 = r2
@@ -316,6 +453,32 @@ def train_and_predict_ws302(spark):
                 continue
             
             logger.info(f"✅ {metric} - Mejor: {best_model_name} (R²={best_r2:.4f})")
+            
+            # Generar matriz de confusión
+            try:
+                predictions = best_model.transform(test_data)
+                pred_pandas = predictions.select("label", "prediction").toPandas()
+                
+                # Calcular percentiles para categorización
+                p33 = np.percentile(pred_pandas['label'], 33)
+                p66 = np.percentile(pred_pandas['label'], 66)
+                
+                # Categorizar valores
+                pred_pandas['true_category'] = pred_pandas['label'].apply(lambda x: categorize_value(x, p33, p66))
+                pred_pandas['pred_category'] = pred_pandas['prediction'].apply(lambda x: categorize_value(x, p33, p66))
+                
+                # Crear matriz de confusión
+                confusion_data = {}
+                for true_cat in ['bajo', 'medio', 'alto']:
+                    for pred_cat in ['bajo', 'medio', 'alto']:
+                        count = len(pred_pandas[(pred_pandas['true_category'] == true_cat) & 
+                                               (pred_pandas['pred_category'] == pred_cat)])
+                        confusion_data[(true_cat, pred_cat)] = count
+                
+                save_confusion_matrix(sensor_type, best_model_name, confusion_data)
+            except Exception as e:
+                logger.error(f"Error generando matriz de confusión para {metric}: {e}")
+
             
             # Predicciones futuras
             last_timestamp = df_clean.agg({"timestamp_num": "max"}).collect()[0][0]

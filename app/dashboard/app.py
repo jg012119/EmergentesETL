@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import time
+import numpy as np
 
 st.set_page_config(page_title="Dashboard IoT - Big Data ML", page_icon="📊", layout="wide")
 
@@ -324,6 +325,153 @@ elif sensor_type == "WS302 Sonido":
             else:
                 st.info("⚠️ No hay predicciones generadas aún.")
 
+# ========================================
+# MÉTRICAS DE MACHINE LEARNING
+# ========================================
+if st.sidebar.checkbox("📊 Mostrar Métricas de ML"):
+    st.divider()
+    st.header("🤖 Métricas de Machine Learning")
+    
+    # Selector de tipo de sensor
+    all_sensors = ["Todos", "EM310", "EM500_CO2", "EM500_TEMP", "EM500_HUM", "EM500_PRES", 
+                   "WS302_LAeq", "WS302_LAI", "WS302_LAImax"]
+    sensor_filter = st.selectbox("🔍 Filtrar por tipo de sensor", all_sensors)
+    
+    # Cargar métricas
+    if sensor_filter == "Todos":
+        metrics_query = "SELECT * FROM ml_metricas ORDER BY fecha_generacion DESC"
+    else:
+        metrics_query = f"SELECT * FROM ml_metricas WHERE tipo_sensor='{sensor_filter}' ORDER BY fecha_generacion DESC"
+    
+    df_metrics = load_data(metrics_query)
+    
+    if not df_metrics.empty:
+        # Mostrar tabla de métricas
+        st.subheader("📈 Tabla de Métricas de Evaluación")
+        st.dataframe(
+            df_metrics[['fecha_generacion', 'tipo_sensor', 'modelo', 'r2_score', 'rmse', 'mae']].head(20),
+            use_container_width=True
+        )
+        
+        # Gráfico comparativo de modelos
+        st.subheader("📊 Comparación de Modelos")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Gráfico de R² por modelo
+            fig_r2 = px.bar(
+                df_metrics.groupby(['tipo_sensor', 'modelo'])['r2_score'].mean().reset_index(),
+                x='modelo', y='r2_score', color='tipo_sensor',
+                title='R² Score Promedio por Modelo y Sensor',
+                labels={'r2_score': 'R² Score', 'modelo': 'Modelo'},
+                barmode='group'
+            )
+            fig_r2.update_layout(height=400)
+            st.plotly_chart(fig_r2, use_container_width=True)
+        
+        with col2:
+            # Gráfico de RMSE por modelo
+            fig_rmse = px.bar(
+                df_metrics.groupby(['tipo_sensor', 'modelo'])['rmse'].mean().reset_index(),
+                x='modelo', y='rmse', color='tipo_sensor',
+                title='RMSE Promedio por Modelo y Sensor',
+                labels={'rmse': 'RMSE', 'modelo': 'Modelo'},
+                barmode='group'
+            )
+            fig_rmse.update_layout(height=400)
+            st.plotly_chart(fig_rmse, use_container_width=True)
+        
+        # MAE
+        fig_mae = px.bar(
+            df_metrics.groupby(['tipo_sensor', 'modelo'])['mae'].mean().reset_index(),
+            x='modelo', y='mae', color='tipo_sensor',
+            title='MAE Promedio por Modelo y Sensor',
+            labels={'mae': 'MAE', 'modelo': 'Modelo'},
+            barmode='group'
+        )
+        fig_mae.update_layout(height=400)
+        st.plotly_chart(fig_mae, use_container_width=True)
+        
+        # Matriz de Confusión
+        st.divider()
+        st.subheader("🎯 Matriz de Confusión")
+        
+        # Obtener sensores únicos con matrices de confusión
+        if sensor_filter == "Todos":
+            cm_query = "SELECT DISTINCT tipo_sensor FROM confusion_matrix ORDER BY tipo_sensor"
+        else:
+            cm_query = f"SELECT DISTINCT tipo_sensor FROM confusion_matrix WHERE tipo_sensor='{sensor_filter}'"
+        
+        df_sensors = load_data(cm_query)
+        
+        if not df_sensors.empty and len(df_sensors) > 0:
+            sensor_tabs = st.tabs(df_sensors['tipo_sensor'].tolist())
+            
+            for idx, sensor in enumerate(df_sensors['tipo_sensor'].tolist()):
+                with sensor_tabs[idx]:
+                    # Obtener datos de matriz de confusión para este sensor
+                    cm_query = f"""
+                    SELECT modelo, true_label, predicted_label, count 
+                    FROM confusion_matrix 
+                    WHERE tipo_sensor='{sensor}' 
+                    ORDER BY fecha_generacion DESC
+                    LIMIT 9
+                    """
+                    df_cm = load_data(cm_query)
+                    
+                    if not df_cm.empty and len(df_cm) > 0:
+                        modelo = df_cm['modelo'].iloc[0]
+                        
+                        # Crear matriz 3x3
+                        labels = ['bajo', 'medio', 'alto']
+                        matrix = np.zeros((3, 3))
+                        
+                        for _, row in df_cm.iterrows():
+                            true_idx = labels.index(row['true_label'])
+                            pred_idx = labels.index(row['predicted_label'])
+                            matrix[true_idx][pred_idx] = row['count']
+                        
+                        # Crear heatmap
+                        fig_cm = go.Figure(data=go.Heatmap(
+                            z=matrix,
+                            x=['Bajo (pred)', 'Medio (pred)', 'Alto (pred)'],
+                            y=['Bajo (real)', 'Medio (real)', 'Alto (real)'],
+                            colorscale='Blues',
+                            text=matrix.astype(int),
+                            texttemplate='%{text}',
+                            textfont={"size": 16},
+                            hoverongaps=False
+                        ))
+                        
+                        fig_cm.update_layout(
+                            title=f'Matriz de Confusión - {sensor} ({modelo})',
+                            xaxis_title='Valores Predichos',
+                            yaxis_title='Valores Reales',
+                            height=400
+                        )
+                        
+                        st.plotly_chart(fig_cm, use_container_width=True)
+                        
+                        # Calcular accuracy
+                        total = matrix.sum()
+                        correct = matrix.diagonal().sum()
+                        accuracy = (correct / total * 100) if total > 0 else 0
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("🎯 Accuracy", f"{accuracy:.2f}%")
+                        with col2:
+                            st.metric("📊 Total Muestras", f"{int(total)}")
+                        with col3:
+                            st.metric("✅ Correctos", f"{int(correct)}")
+                    else:
+                        st.info("⚠️ No hay datos de matriz de confusión para este sensor.")
+        else:
+            st.info("⚠️ No hay matrices de confusión generadas aún.")
+    else:
+        st.info("⚠️ No hay métricas disponibles. Ejecute el job de ML primero.")
+
 # Footer
 st.divider()
 st.caption("🔄 Dashboard actualizado cada 10 segundos | 🤖 Big Data ML con Apache Spark")
@@ -332,3 +480,4 @@ st.caption("🔄 Dashboard actualizado cada 10 segundos | 🤖 Big Data ML con A
 import time
 time.sleep(10)
 st.rerun()
+

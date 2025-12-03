@@ -103,6 +103,43 @@ CREATE TABLE IF NOT EXISTS `predicciones` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
+-- Tabla: ml_metricas
+-- Descripción: Almacena métricas de evaluación de modelos ML
+-- ============================================
+CREATE TABLE IF NOT EXISTS `ml_metricas` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `fecha_generacion` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `tipo_sensor` VARCHAR(50),
+    `modelo` VARCHAR(50),
+    `r2_score` FLOAT,
+    `rmse` FLOAT,
+    `mae` FLOAT,
+    `mape` FLOAT,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_tipo_sensor` (`tipo_sensor`),
+    INDEX `idx_modelo` (`modelo`),
+    INDEX `idx_fecha_generacion` (`fecha_generacion`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
+-- Tabla: confusion_matrix
+-- Descripción: Almacena datos de matriz de confusión
+-- ============================================
+CREATE TABLE IF NOT EXISTS `confusion_matrix` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `fecha_generacion` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `tipo_sensor` VARCHAR(50),
+    `modelo` VARCHAR(50),
+    `true_label` VARCHAR(50),
+    `predicted_label` VARCHAR(50),
+    `count` INT,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_tipo_sensor` (`tipo_sensor`),
+    INDEX `idx_modelo` (`modelo`),
+    INDEX `idx_fecha_generacion` (`fecha_generacion`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
 -- Verificación de tablas creadas
 -- ============================================
 SHOW TABLES;
